@@ -41,7 +41,7 @@ def prepare_visualization_data(df):
         df: DataFrame with cluster, title, and 2D coordinate information
 
     Returns:
-        List of dictionaries ready for JSON serialization
+        Tuple of (vis_data, metadata) where metadata contains country and top words
     """
     logger.info("Preparing visualization data...")
 
@@ -63,15 +63,51 @@ def prepare_visualization_data(df):
             'eventRootCode': event_root_code
         })
 
+    country_name = 'Unknown'
+    if 'ActionGeo_FullName' in df.columns:
+        country_mentions = df['ActionGeo_FullName'].value_counts()
+        if len(country_mentions) > 0:
+            top_location = str(country_mentions.index[0])
+            if ',' in top_location:
+                country_name = top_location.split(',')[-1].strip()
+            else:
+                country_name = top_location.strip()
+
+    from collections import Counter
+    import re
+
+    all_words = []
+    for title in df['url_title'].dropna():
+        words = re.findall(r'\b[a-zA-Z]{4,}\b', title.lower())
+        all_words.extend(words)
+
+    stop_words = {'that', 'this', 'with', 'from', 'have', 'been', 'were', 'will',
+                  'their', 'there', 'what', 'when', 'where', 'which', 'about',
+                  'after', 'says', 'over', 'more', 'than', 'into', 'could', 'would'}
+
+    filtered_words = [w for w in all_words if w not in stop_words]
+    word_counts = Counter(filtered_words)
+    top_words = [word for word, count in word_counts.most_common(5)]
+
+    metadata = {
+        'country': country_name,
+        'top_words': top_words
+    }
+
     logger.info(f"Prepared {len(vis_data)} data points")
+    logger.info(f"Country: {country_name}")
+    logger.info(f"Top words: {', '.join(top_words)}")
 
-    return vis_data
+    return vis_data, metadata
 
 
-def generate_html(vis_data, output_file='docs/index.html'):
+def generate_html(vis_data, metadata, output_file='docs/index.html'):
     """Generate modern interactive HTML visualization."""
     output_path = Path(__file__).parent.parent / output_file
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    country_name = metadata.get('country', 'Unknown')
+    top_words = metadata.get('top_words', [])
 
     cluster_colors = [
         '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
@@ -85,7 +121,7 @@ def generate_html(vis_data, output_file='docs/index.html'):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GDELT Stars - Interactive Visualization</title>
+    <title>{country_name} - GDELT News Visualization</title>
     <style>
         * {{
             margin: 0;
@@ -301,9 +337,11 @@ def generate_html(vis_data, output_file='docs/index.html'):
     <canvas id="canvas"></canvas>
 
     <div id="info-panel">
-        <h1>GDELT Stars</h1>
+        <h1>{country_name}</h1>
         <p><strong>Total Events:</strong> <span id="total-events">0</span></p>
         <p><strong>Clusters:</strong> <span id="total-clusters">0</span></p>
+        <p style="margin-top: 10px;"><strong>Top Words:</strong></p>
+        <p style="font-size: 11px; color: #4ECDC4; text-transform: uppercase; letter-spacing: 1px;">{' · '.join(top_words)}</p>
         <p style="margin-top: 10px; font-size: 11px;">Hover over stars to see details. Scroll to zoom. Drag to pan.</p>
     </div>
 
@@ -761,21 +799,23 @@ def generate_html(vis_data, output_file='docs/index.html'):
 def main():
     """Main execution function."""
     print("=" * 60)
-    print("GDELT Stars Visualization Generator")
+    print("GDELT News Visualization Generator")
     print("=" * 60)
     print()
 
     data = load_clustered_data()
 
-    vis_data = prepare_visualization_data(data)
+    vis_data, metadata = prepare_visualization_data(data)
 
-    output_file = generate_html(vis_data)
+    output_file = generate_html(vis_data, metadata)
 
     print()
     print("=" * 60)
     print("DONE!")
+    print(f"Country: {metadata['country']}")
+    print(f"Top words: {', '.join(metadata['top_words'])}")
     print(f"Visualization saved to: {output_file}")
-    print(f"Total stars: {len(vis_data)}")
+    print(f"Total events: {len(vis_data)}")
     print("=" * 60)
     print()
     print("Open the HTML file in your browser to explore the visualization!")
