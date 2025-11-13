@@ -47,6 +47,9 @@ def prepare_visualization_data(df):
 
     vis_data = []
     for idx, row in df.iterrows():
+        event_code = str(row.get('EventCode', ''))
+        event_root_code = str(row.get('EventRootCode', event_code[:2] if len(event_code) >= 2 else ''))
+
         vis_data.append({
             'x': float(row['x_2d']),
             'y': float(row['y_2d']),
@@ -55,7 +58,9 @@ def prepare_visualization_data(df):
             'keywords': str(row.get('cluster_keywords', '')),
             'date': str(row.get('SQLDATE', 'N/A')),
             'url': str(row.get('SOURCEURL', '')),
-            'goldstein': float(row.get('GoldsteinScale', 0)) if pd.notna(row.get('GoldsteinScale')) else 0
+            'goldstein': float(row.get('GoldsteinScale', 0)) if pd.notna(row.get('GoldsteinScale')) else 0,
+            'eventCode': event_code,
+            'eventRootCode': event_root_code
         })
 
     logger.info(f"Prepared {len(vis_data)} data points")
@@ -63,7 +68,7 @@ def prepare_visualization_data(df):
     return vis_data
 
 
-def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html'):
+def generate_html(vis_data, output_file='docs/index.html'):
     """Generate modern interactive HTML visualization."""
     output_path = Path(__file__).parent.parent / output_file
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +202,99 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
         #controls button:hover {{
             background: rgba(78, 205, 196, 0.4);
         }}
+
+        #controls button.active {{
+            background: rgba(78, 205, 196, 0.6);
+            border: 1px solid #45B7D1;
+        }}
+
+        #controls .control-group {{
+            margin-bottom: 15px;
+        }}
+
+        #controls .control-label {{
+            font-size: 10px;
+            color: #999999;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }}
+
+        #legend {{
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            max-width: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }}
+
+        #legend h3 {{
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #4ECDC4;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 11px;
+        }}
+
+        .legend-color {{
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }}
+
+        .legend-label {{
+            color: #cccccc;
+            line-height: 1.3;
+        }}
+
+        .legend-gradient {{
+            width: 100%;
+            height: 20px;
+            border-radius: 3px;
+            margin-bottom: 8px;
+        }}
+
+        .legend-scale {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #999999;
+            margin-bottom: 5px;
+        }}
+
+        #legend::-webkit-scrollbar {{
+            width: 6px;
+        }}
+
+        #legend::-webkit-scrollbar-track {{
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }}
+
+        #legend::-webkit-scrollbar-thumb {{
+            background: rgba(78, 205, 196, 0.3);
+            border-radius: 3px;
+        }}
+
+        #legend::-webkit-scrollbar-thumb:hover {{
+            background: rgba(78, 205, 196, 0.5);
+        }}
     </style>
 </head>
 <body>
@@ -210,14 +308,23 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
     </div>
 
     <div id="controls">
-        <button onclick="resetView()">Reset View</button>
-        <button onclick="toggleWords()">Toggle Words</button>
+        <div class="control-group">
+            <div class="control-label">Color By</div>
+            <button id="colorCluster" class="active" onclick="setColorMode('cluster')">Cluster</button>
+            <button id="colorGoldstein" onclick="setColorMode('goldstein')">Goldstein Scale</button>
+            <button id="colorEvent" onclick="setColorMode('event')">Event Category</button>
+        </div>
     </div>
 
     <div id="tooltip">
         <div class="title"></div>
         <div class="meta"></div>
         <div class="keywords"></div>
+    </div>
+
+    <div id="legend">
+        <h3 id="legend-title">Legend</h3>
+        <div id="legend-content"></div>
     </div>
 
     <script>
@@ -237,6 +344,53 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
         let lastMouseX = 0;
         let lastMouseY = 0;
         let showWords = true;
+        let colorMode = 'cluster';
+
+        const eventCategoryColors = {{
+            '01': '#FF6B6B',
+            '02': '#4ECDC4',
+            '03': '#45B7D1',
+            '04': '#FFA07A',
+            '05': '#98D8C8',
+            '06': '#F7DC6F',
+            '07': '#BB8FCE',
+            '08': '#85C1E2',
+            '09': '#F8B88B',
+            '10': '#ABEBC6',
+            '11': '#E74C3C',
+            '12': '#E67E22',
+            '13': '#C0392B',
+            '14': '#8E44AD',
+            '15': '#16A085',
+            '16': '#D35400',
+            '17': '#C0392B',
+            '18': '#922B21',
+            '19': '#641E16',
+            '20': '#34495E',
+        }};
+
+        const eventCategoryNames = {{
+            '01': 'Make public statement',
+            '02': 'Appeal',
+            '03': 'Express intent to cooperate',
+            '04': 'Consult',
+            '05': 'Engage in diplomatic cooperation',
+            '06': 'Engage in material cooperation',
+            '07': 'Provide aid',
+            '08': 'Yield',
+            '09': 'Investigate',
+            '10': 'Demand',
+            '11': 'Disapprove',
+            '12': 'Reject',
+            '13': 'Threaten',
+            '14': 'Protest',
+            '15': 'Exhibit force posture',
+            '16': 'Reduce relations',
+            '17': 'Coerce',
+            '18': 'Assault',
+            '19': 'Fight',
+            '20': 'Use unconventional mass violence',
+        }};
 
         canvas.width = width * window.devicePixelRatio;
         canvas.height = height * window.devicePixelRatio;
@@ -297,6 +451,21 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
 
         const clusterCenters = calculateClusterCenters();
 
+        function getPointColor(point) {{
+            if (colorMode === 'cluster') {{
+                return colors[point.cluster % colors.length];
+            }} else if (colorMode === 'goldstein') {{
+                const normalized = (point.goldstein + 10) / 20;
+                const r = Math.floor(255 * (1 - normalized));
+                const g = Math.floor(255 * normalized);
+                return `rgb(${{r}}, ${{g}}, 100)`;
+            }} else if (colorMode === 'event') {{
+                const category = point.eventRootCode || '01';
+                return eventCategoryColors[category] || '#999999';
+            }}
+            return '#999999';
+        }}
+
         function draw() {{
             ctx.clearRect(0, 0, width, height);
 
@@ -308,7 +477,7 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
                     return;
                 }}
 
-                const color = colors[point.cluster % colors.length];
+                const color = getPointColor(point);
                 const size = Math.max(2, 3 * scale);
                 const glowSize = Math.max(4, 8 * scale);
 
@@ -480,15 +649,85 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
             }}
         }});
 
-        function resetView() {{
-            scale = 1;
-            offsetX = 0;
-            offsetY = 0;
-            draw();
+        function updateLegend() {{
+            const legendContent = document.getElementById('legend-content');
+            const legendTitle = document.getElementById('legend-title');
+
+            if (colorMode === 'cluster') {{
+                legendTitle.textContent = 'Clusters';
+                const clusters = [...new Set(data.map(d => d.cluster))].sort((a, b) => a - b);
+                const clusterKeywords = {{}};
+
+                data.forEach(point => {{
+                    if (!clusterKeywords[point.cluster]) {{
+                        clusterKeywords[point.cluster] = point.keywords;
+                    }}
+                }});
+
+                let html = '';
+                clusters.forEach(clusterId => {{
+                    const color = colors[clusterId % colors.length];
+                    const keywords = clusterKeywords[clusterId] || 'N/A';
+                    const shortKeywords = keywords.split(',').slice(0, 2).join(', ');
+                    html += `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: ${{color}}"></div>
+                            <div class="legend-label">Cluster ${{clusterId}}: ${{shortKeywords}}</div>
+                        </div>
+                    `;
+                }});
+                legendContent.innerHTML = html;
+
+            }} else if (colorMode === 'goldstein') {{
+                legendTitle.textContent = 'Goldstein Scale';
+                let html = `
+                    <div class="legend-gradient" style="background: linear-gradient(to right, rgb(255, 0, 100), rgb(128, 128, 100), rgb(0, 255, 100))"></div>
+                    <div class="legend-scale">
+                        <span>-10 (Negative)</span>
+                        <span>0 (Neutral)</span>
+                        <span>+10 (Positive)</span>
+                    </div>
+                    <p style="font-size: 10px; color: #999; margin-top: 8px; line-height: 1.4;">
+                        The Goldstein scale measures event tone from very negative (-10) to very positive (+10).
+                    </p>
+                `;
+                legendContent.innerHTML = html;
+
+            }} else if (colorMode === 'event') {{
+                legendTitle.textContent = 'Event Categories';
+                const categoriesInData = [...new Set(data.map(d => d.eventRootCode || '01'))].sort();
+
+                let html = '';
+                categoriesInData.forEach(category => {{
+                    const color = eventCategoryColors[category] || '#999999';
+                    const name = eventCategoryNames[category] || `Category ${{category}}`;
+                    html += `
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: ${{color}}"></div>
+                            <div class="legend-label">${{category}}: ${{name}}</div>
+                        </div>
+                    `;
+                }});
+                legendContent.innerHTML = html;
+            }}
         }}
 
-        function toggleWords() {{
-            showWords = !showWords;
+        function setColorMode(mode) {{
+            colorMode = mode;
+
+            document.querySelectorAll('#controls button[id^="color"]').forEach(btn => {{
+                btn.classList.remove('active');
+            }});
+
+            if (mode === 'cluster') {{
+                document.getElementById('colorCluster').classList.add('active');
+            }} else if (mode === 'goldstein') {{
+                document.getElementById('colorGoldstein').classList.add('active');
+            }} else if (mode === 'event') {{
+                document.getElementById('colorEvent').classList.add('active');
+            }}
+
+            updateLegend();
             draw();
         }}
 
@@ -504,6 +743,7 @@ def generate_html(vis_data, output_file='output/gdelt_stars_visualization.html')
         }}
 
         initStats();
+        updateLegend();
         animate();
     </script>
 </body>

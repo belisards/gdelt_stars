@@ -93,9 +93,9 @@ def main():
     print("  • data/gdelt_brazil_data.csv")
     print("  • data/gdelt_brazil_data_enriched.csv")
     print("  • data/gdelt_brazil_data_clustered.csv")
-    print("  • output/gdelt_stars_visualization.html")
+    print("  • docs/index.html")
     print()
-    print("Open 'output/gdelt_stars_visualization.html' in your browser to explore!")
+    print("Open 'docs/index.html' in your browser to explore!")
     print()
 
 
